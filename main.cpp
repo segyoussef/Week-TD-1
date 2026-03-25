@@ -90,7 +90,30 @@ public:
 	// and the unit normal N
 	bool intersect(const Ray& ray, Vector& P, double &t, Vector& N) const {
 		 // TODO (lab 1) : compute the intersection (just true/false at the begining of lab 1, then P, t and N as well)
-		return false;
+		Vector OC = ray.O - C;
+
+		double b = dot(ray.u, OC);
+		double norme2_OC = dot(OC, OC);
+
+		double delta = b * b - (norme2_OC - R * R);
+
+		if (delta < 0) return false;
+
+		double sqrt_delta = sqrt(delta);
+
+		double t_moins = -b - sqrt_delta;
+		double t_plus = -b + sqrt_delta;
+
+		if (t_plus < 0) return false;
+
+		t = (t_moins >= 0) ? t_moins : t_plus;
+
+		P = ray.O + t * ray.u;
+
+		N = P - C;
+		N.normalize();
+
+		return true;
 	}
 
 	double R;
