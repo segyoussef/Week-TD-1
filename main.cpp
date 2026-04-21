@@ -54,6 +54,9 @@ Vector operator*(const double a, const Vector& b) {
 Vector operator*(const Vector& a, const double b) {
 	return Vector(a[0]*b, a[1]*b, a[2]*b);
 }
+Vector operator*(const Vector& a, const Vector& b) {
+	return Vector(a[0] * b[0], a[1] * b[1], a[2] * b[2]);
+}
 Vector operator/(const Vector& a, const double b) {
 	return Vector(a[0] / b, a[1] / b, a[2] / b);
 }
@@ -150,7 +153,23 @@ public:
 		// TODO (lab 1): iterate through the objects and check the intersections with all of them, 
 		// and keep the closest intersection, i.e., the one if smallest positive value of t
 
-		return false;
+        bool intersection_trouvee = false;
+        double t_min = 1e9;
+        for (int i = 0; i < objects.size(); i++) {
+            Vector P_test, N_test;
+            double t_test;
+            if (objects[i]->intersect(ray, P_test, t_test, N_test)) {
+                if (t_test < t_min) {
+                    intersection_trouvee = true;
+                    t_min = t_test;
+                    P = P_test;
+                    N = N_test;
+                    object_id = i;
+                }
+            }
+        }
+        t = t_min;
+        return intersection_trouvee;
 	}
 
 
@@ -180,12 +199,54 @@ public:
 			// test if there is a shadow by sending a new ray
 			// if there is no shadow, compute the formula with dot products etc.
 
+			Vector albedo = objects[object_id]->albedo;
+			Vector couleur_directe(0., 0., 0.);
 
-			// TODO (lab 2) : add indirect lighting component with a recursive call
+			Vector PL = light_position - P;
+			double distance2_lumiere = PL.norm2();
+			PL.normalize();
+			double epsilon = 1e-4;
+			Ray rayon_ombre(P + epsilon * N, PL);
+			Vector P_ombre, N_ombre;
+			double t_ombre;
+			int object_id_ombre;
+			bool visible = true;
+			if (intersect(rayon_ombre, P_ombre, t_ombre, N_ombre, object_id_ombre)) {
+				double distance2_obstacle = (P_ombre - P).norm2();
+				if (distance2_obstacle <= distance2_lumiere) {
+					visible = false;
+				}
+			}
+			if (visible) {
+				double cos_theta = dot(N, PL);
+				if (cos_theta < 0) cos_theta = 0;
+				couleur_directe = (light_intensity / (4 * M_PI * distance2_lumiere)) * (albedo / M_PI) * cos_theta;
+			}
+
+
+			double r1 = uniform(engine[0]);
+			double r2 = uniform(engine[0]);
+			double x = cos(2.0 * M_PI * r1) * sqrt(1.0 - r2);
+			double y = sin(2.0 * M_PI * r1) * sqrt(1.0 - r2);
+			double z = sqrt(r2);
+			Vector T1;
+			if (std::abs(N[0]) <= std::abs(N[1]) && std::abs(N[0]) <= std::abs(N[2])) {
+				T1 = Vector(0, -N[2], N[1]);
+			}
+			else if (std::abs(N[1]) <= std::abs(N[0]) && std::abs(N[1]) <= std::abs(N[2])) {
+				T1 = Vector(-N[2], 0, N[0]);
+			}
+			else {
+				T1 = Vector(-N[1], N[0], 0);
+			}
+			T1.normalize();
+			Vector T2 = cross(N, T1);
+			Vector direction_aleatoire = x * T1 + y * T2 + z * N;
+			direction_aleatoire.normalize();
+			Ray rayon_indirect(P + epsilon * N, direction_aleatoire);
+			Vector couleur_indirecte = albedo * getColor(rayon_indirect, recursion_depth + 1);
+			return couleur_directe + couleur_indirecte;
 		}
-
-		
-
 		return Vector(0, 0, 0);
 	}
 
@@ -218,37 +279,72 @@ int main() {
 	scene.light_position = Vector(-10,20,40);
 	scene.light_intensity = 3E7;
 	scene.fov = 60 * M_PI / 180.;
-	scene.gamma = 1.0;    // TODO (lab 1) : play with gamma ; typically, gamma = 2.2
+	scene.gamma = 2.2;    // TODO (lab 1) : play with gamma ; typically, gamma = 2.2
 	scene.max_light_bounce = 5;
 
 	scene.addObject(&center_sphere);
 
-	/*
+
 	scene.addObject(&wall_left);
 	scene.addObject(&wall_right);
 	scene.addObject(&wall_front);
 	scene.addObject(&wall_behind);
 	scene.addObject(&ceiling);
 	scene.addObject(&floor);
-	*/
+
 
 	std::vector<unsigned char> image(W * H * 3, 0);
 
 #pragma omp parallel for schedule(dynamic, 1)
 	for (int i = 0; i < H; i++) {
 		for (int j = 0; j < W; j++) {
-			Vector color;
 
-			// TODO (lab 1) : correct ray_direction so that it goes through each pixel (j, i)			
-			Vector ray_direction(0., 0., -1);
-
-			Ray ray(scene.camera_center, ray_direction);
+			// TODO (lab 1) : correct ray_direction so that it goes through each pixel (j, i)		
 
 			// TODO (lab 2) : add Monte Carlo / averaging of random ray contributions here
 			// TODO (lab 2) : add antialiasing by altering the ray_direction here
 			// TODO (lab 2) : add depth of field effect by altering the ray origin (and direction) here
 
-			color  = scene.getColor(ray, 0);
+			Vector color(0., 0., 0.);
+
+			int nomb_samples = 32;
+
+			double sigma = 0.5;
+
+			for (int k = 0; k < nomb_samples; k++) {
+
+				double r1 = uniform(engine[0]);
+				double r2 = uniform(engine[0]);
+
+				double rayon = sigma * sqrt(-2.0 * log(r1));
+				double dx = rayon * cos(2.0 * M_PI * r2);
+				double dy = rayon * sin(2.0 * M_PI * r2);
+				double x = j - W / 2.0 + 0.5 + dx;
+				double y = H / 2.0 - i - 0.5 - dy;
+				double z = -W / (2.0 * tan(scene.fov / 2.0));
+				Vector ray_direction(x, y, z);
+
+				ray_direction.normalize();
+
+
+				double distance_focale = 55.0;
+				Vector point_focal = scene.camera_center + distance_focale * ray_direction;
+				double ouverture = 0.3;
+				double u1 = uniform(engine[0]);
+				double u2 = uniform(engine[0]);
+				double rayon_lentille = ouverture * sqrt(u1);
+				double theta = 2.0 * M_PI * u2;
+				double lens_x = rayon_lentille * cos(theta);
+				double lens_y = rayon_lentille * sin(theta);
+				Vector nouvelle_origine = scene.camera_center + Vector(lens_x, lens_y, 0.0);
+				Vector nouvelle_direction = point_focal - nouvelle_origine;
+				nouvelle_direction.normalize();
+				Ray ray(nouvelle_origine, nouvelle_direction);
+				color = color + scene.getColor(ray, 0);
+
+			}
+
+			color = color / nomb_samples;
 
 			image[(i * W + j) * 3 + 0] = std::min(255., std::max(0., 255. * std::pow(color[0] / 255., 1. / scene.gamma)));
 			image[(i * W + j) * 3 + 1] = std::min(255., std::max(0., 255. * std::pow(color[1] / 255., 1. / scene.gamma)));
