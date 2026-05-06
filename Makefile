@@ -1,5 +1,5 @@
 CXX = g++
-CXXFLAGS = -g -fopenmp
+CXXFLAGS = -O3 -fopenmp
 
 all: render
 
